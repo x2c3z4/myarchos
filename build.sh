@@ -10,6 +10,8 @@ readonly IMAGE="image.img"
 # shellcheck disable=SC2016
 readonly MIRROR='https://geo.mirror.pkgbuild.com/$repo/os/$arch'
 
+rm -rf output
+
 function init() {
   readonly ORIG_PWD="${PWD}"
   readonly OUTPUT="${PWD}/output"
@@ -57,8 +59,8 @@ function setup_disk() {
   # Partscan is racy
   wait_until_settled "${LOOPDEV}"
   mkfs.fat -F 32 -S 4096 "${LOOPDEV}p2"
-  mkfs.btrfs "${LOOPDEV}p3"
-  mount -o compress=zstd:1 "${LOOPDEV}p3" "${MOUNT}"
+  mkfs.ext4 "${LOOPDEV}p3"
+  mount "${LOOPDEV}p3" "${MOUNT}"
   mount --mkdir "${LOOPDEV}p2" "${MOUNT}/efi"
 }
 
@@ -77,7 +79,7 @@ EOF
   echo "Server = ${MIRROR}" >mirrorlist
 
   # We use the hosts package cache
-  pacstrap -c -C pacman.conf -K -M "${MOUNT}" base linux grub openssh sudo btrfs-progs dosfstools efibootmgr qemu-guest-agent
+  pacstrap -c -C pacman.conf -K -M "${MOUNT}" base linux grub openssh sudo dosfstools efibootmgr qemu-guest-agent
   # Workaround for https://gitlab.archlinux.org/archlinux/arch-install-scripts/-/issues/56
   gpgconf --homedir "${MOUNT}/etc/pacman.d/gnupg" --kill gpg-agent
   cp mirrorlist "${MOUNT}/etc/pacman.d/"
@@ -94,8 +96,16 @@ function image_cleanup() {
   # Ex: Some systems need the virtio-scsi kernel module and not the
   # "autodetected" virtio-blk kernel module for disk access.
   #
-  # So for the initial install we skip the autodetct hook.
   arch-chroot "${MOUNT}" /usr/bin/mkinitcpio -p linux -- -S autodetect
+  # So for the initial install we use the fallback initramfs, and
+  # "autodetect" should add the relevant modules to the initramfs when
+  # the user updates the kernel.
+  #cp --reflink=always -a "${MOUNT}/boot/"{initramfs-linux-fallback.img,initramfs-linux.img}
+  # So for the initial install we use the fallback initramfs, and
+  # "autodetect" should add the relevant modules to the initramfs when
+  # the user updates the kernel.
+  #cp --reflink=always -a "${MOUNT}/boot/"{initramfs-linux-fallback.img,initramfs-linux.img}
+  #mv "${MOUNT}/boot/"{initramfs-linux-fallback.img,initramfs-linux.img}
 
   sync -f "${MOUNT}/etc/os-release"
   fstrim --verbose "${MOUNT}"
@@ -118,7 +128,8 @@ function mount_image() {
   LOOPDEV=$(losetup --find --partscan --show "${1:-${IMAGE}}")
   # Partscan is racy
   wait_until_settled "${LOOPDEV}"
-  mount -o compress=zstd:1 "${LOOPDEV}p3" "${MOUNT}"
+  mount "${LOOPDEV}p3" "${MOUNT}"
+  resize2fs "${LOOPDEV}p3"
   # Setup bind mount to package cache
   mount --bind "/var/cache/pacman/pkg" "${MOUNT}/var/cache/pacman/pkg"
 }
@@ -132,11 +143,13 @@ function unmount_image() {
 
 # Compute SHA256, adjust owner to $SUDO_UID:$SUDO_UID and move to output/
 function mv_to_output() {
-  sha256sum "${1}" >"${1}.SHA256"
-  if [ -n "${SUDO_UID:-}" ]; then
-    chown "${SUDO_UID}:${SUDO_GID}" "${1}"{,.SHA256}
-  fi
-  mv "${1}"{,.SHA256} "${OUTPUT}/"
+  #sha256sum "${1}" >"${1}.SHA256"
+  #if [ -n "${SUDO_UID:-}" ]; then
+  #  chown "${SUDO_UID}:${SUDO_GID}" "${1}"{,.SHA256}
+  #fi
+  #mv "${1}"{,.SHA256} "${OUTPUT}/"
+  mv "${1}" "${OUTPUT}/"
+  ln -sf "${OUTPUT}/${1}" "${OUTPUT}/arch.qcow2"
 }
 
 # Helper function: create a new image from the "base" image
@@ -155,17 +168,17 @@ function create_image() {
       "${tmp_image}"
   fi
   mount_image "${tmp_image}"
-  if [ -n "${DISK_SIZE}" ]; then
-    btrfs filesystem resize max "${MOUNT}"
-  fi
+  #if [ -n "${DISK_SIZE}" ]; then
+    #btrfs filesystem resize max "${MOUNT}"
+  #fi
 
+  "${2}"
   if [ 0 -lt "${#PACKAGES[@]}" ]; then
     arch-chroot "${MOUNT}" /usr/bin/pacman -S --noconfirm "${PACKAGES[@]}"
   fi
   if [ 0 -lt "${#SERVICES[@]}" ]; then
     arch-chroot "${MOUNT}" /usr/bin/systemctl enable "${SERVICES[@]}"
   fi
-  "${2}"
   image_cleanup
   unmount_image
   "${3}" "${tmp_image}" "${1}"
