@@ -10,6 +10,8 @@ readonly IMAGE="image.img"
 # shellcheck disable=SC2016
 readonly MIRROR='https://geo.mirror.pkgbuild.com/$repo/os/$arch'
 
+rm -rf output
+
 function init() {
   readonly ORIG_PWD="${PWD}"
   readonly OUTPUT="${PWD}/output"
@@ -161,13 +163,13 @@ function create_image() {
     btrfs filesystem resize max "${MOUNT}"
   fi
 
+  "${2}"
   if [ 0 -lt "${#PACKAGES[@]}" ]; then
     arch-chroot "${MOUNT}" /usr/bin/pacman -S --noconfirm "${PACKAGES[@]}"
   fi
   if [ 0 -lt "${#SERVICES[@]}" ]; then
     arch-chroot "${MOUNT}" /usr/bin/systemctl enable "${SERVICES[@]}"
   fi
-  "${2}"
   image_cleanup
   unmount_image
   "${3}" "${tmp_image}" "${1}"

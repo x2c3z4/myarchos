@@ -1,0 +1,18 @@
+#!/bin/bash
+
+mkdir /root/shared 2>/dev/null
+mount -t 9p -o trans=virtio fs0 /root/shared 2>/dev/null
+mount -t debugfs debugfs /sys/kernel/debug/ 2>/dev/null
+
+change_disk() {
+	echo "[+] $1 old val: $(<$1) new: $2"
+	echo $2 >$1
+}
+
+for f in $(ls /sys/block);do
+	change_disk /sys/block/$f/queue/scheduler none
+	change_disk /sys/block/$f/queue/iostats 0
+	change_disk /sys/block/$f/queue/rq_affinity 2
+done
+
+#[ -f /root/shared/autorun.sh ] && /root/shared/autorun.sh

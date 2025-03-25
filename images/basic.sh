@@ -1,10 +1,45 @@
 #!/bin/bash
+set -x
 # shellcheck disable=SC2034,SC2154
 IMAGE_NAME="Arch-Linux-x86_64-basic-${build_version}.qcow2"
 # It is meant for local usage so the disk should be "big enough".
 DISK_SIZE="40G"
-PACKAGES=()
-SERVICES=()
+PACKAGES=(fio)
+SERVICES=(myrc)
+
+function pre1() {
+  sed -Ei 's/^(GRUB_CMDLINE_LINUX_DEFAULT=.*)"$/\1 console=tty0 console=ttyS0,115200"/' "${MOUNT}/etc/default/grub"
+  echo 'GRUB_TERMINAL="serial console"' >>"${MOUNT}/etc/default/grub"
+  echo 'GRUB_SERIAL_COMMAND="serial --speed=115200"' >>"${MOUNT}/etc/default/grub"
+  arch-chroot "${MOUNT}" /usr/bin/grub-mkconfig -o /boot/grub/grub.cfg
+
+  sed -Ei 's/ExecStart=.*/ExecStart=\/sbin\/agetty --autologin root -8 --keep-baud 115200,38400,9600 %I $TERM/g' "${MOUNT}/usr/lib/systemd/system/serial-getty@.service"
+  sed -Ei 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' "${MOUNT}/etc/ssh/sshd_config"
+
+  # reduce the size
+  rm -rf "${MOUNT}/usr/share/{man,doc,info,locale}"
+}
+
+function pre2() {
+  cp ${ORIG_PWD}/rc.local "${MOUNT}/usr/bin/myrc.local"
+  cat <<EOF >"${MOUNT}/etc/systemd/system/myrc.service"
+[Unit]
+Description=My Startup Script
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/bin/myrc.local
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+}
 
 function pre() {
   local NEWUSER="arch"
@@ -23,6 +58,8 @@ RequiredForOnline=routable
 [Network]
 DHCP=yes
 EOF
+  pre1
+  pre2
 }
 
 function post() {
