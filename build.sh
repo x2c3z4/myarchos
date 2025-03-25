@@ -59,8 +59,8 @@ function setup_disk() {
   # Partscan is racy
   wait_until_settled "${LOOPDEV}"
   mkfs.fat -F 32 -S 4096 "${LOOPDEV}p2"
-  mkfs.btrfs "${LOOPDEV}p3"
-  mount -o compress-force=zstd "${LOOPDEV}p3" "${MOUNT}"
+  mkfs.ext4 "${LOOPDEV}p3"
+  mount "${LOOPDEV}p3" "${MOUNT}"
   mount --mkdir "${LOOPDEV}p2" "${MOUNT}/efi"
 }
 
@@ -79,7 +79,7 @@ EOF
   echo "Server = ${MIRROR}" >mirrorlist
 
   # We use the hosts package cache
-  pacstrap -c -C pacman.conf -K -M "${MOUNT}" base linux grub openssh sudo btrfs-progs dosfstools efibootmgr qemu-guest-agent
+  pacstrap -c -C pacman.conf -K -M "${MOUNT}" base linux grub openssh sudo dosfstools efibootmgr qemu-guest-agent
   # Workaround for https://gitlab.archlinux.org/archlinux/arch-install-scripts/-/issues/56
   gpgconf --homedir "${MOUNT}/etc/pacman.d/gnupg" --kill gpg-agent
   cp mirrorlist "${MOUNT}/etc/pacman.d/"
@@ -99,7 +99,8 @@ function image_cleanup() {
   # So for the initial install we use the fallback initramfs, and
   # "autodetect" should add the relevant modules to the initramfs when
   # the user updates the kernel.
-  cp --reflink=always -a "${MOUNT}/boot/"{initramfs-linux-fallback.img,initramfs-linux.img}
+  #cp --reflink=always -a "${MOUNT}/boot/"{initramfs-linux-fallback.img,initramfs-linux.img}
+  mv "${MOUNT}/boot/"{initramfs-linux-fallback.img,initramfs-linux.img}
 
   sync -f "${MOUNT}/etc/os-release"
   fstrim --verbose "${MOUNT}"
@@ -122,7 +123,7 @@ function mount_image() {
   LOOPDEV=$(losetup --find --partscan --show "${1:-${IMAGE}}")
   # Partscan is racy
   wait_until_settled "${LOOPDEV}"
-  mount -o compress-force=zstd "${LOOPDEV}p3" "${MOUNT}"
+  mount "${LOOPDEV}p3" "${MOUNT}"
   # Setup bind mount to package cache
   mount --bind "/var/cache/pacman/pkg" "${MOUNT}/var/cache/pacman/pkg"
 }
@@ -159,9 +160,9 @@ function create_image() {
       "${tmp_image}"
   fi
   mount_image "${tmp_image}"
-  if [ -n "${DISK_SIZE}" ]; then
-    btrfs filesystem resize max "${MOUNT}"
-  fi
+#  if [ -n "${DISK_SIZE}" ]; then
+#    btrfs filesystem resize max "${MOUNT}"
+#  fi
 
   "${2}"
   if [ 0 -lt "${#PACKAGES[@]}" ]; then
